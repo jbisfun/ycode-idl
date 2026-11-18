@@ -255,8 +255,8 @@ local function output_line(line)
     if not path then path, row, kind = line:match("^(.-):(%d+): (%a+):") end
     if path and (kind == "error" or kind == "warning" or kind == "note") then
         local abs = resolve(path)
-        return { "text", line, fg = kind == "error" and "error" or kind == "warning" and "warning"
-            or "accent", on_click = abs and function()
+        return { "text", line, mono = true, size = "small",
+            color = kind == "error" and "error" or kind == "warning" and "warning" or "accent", on_click = abs and function()
                 S.message = basename(abs) .. ":" .. row .. (col and (":" .. col) or "")
                 ycode.open(abs)
             end or nil }
@@ -264,116 +264,35 @@ local function output_line(line)
     local fg
     if line:match("^error") or line:match("^fatal") then fg = "error"
     elseif line:match("^warning") then fg = "warning" end
-    return { "text", line == "" and " " or line, fg = fg }
-end
-
-local function choice(text, selected, on_click)
-    return { "button", text, style = selected and "filled" or nil,
-        on_click = function() on_click() end }
-end
-
-local function section(title, action)
-    return { "list_header", title, sub = true, end_ = action }
+    return { "text", line == "" and " " or line, mono = true, size = "small", color = fg }
 end
 
 local function target_row(t)
-    local sel = S.target == (t and t.name)
     if not t then
-        return { "list_item", selected = sel,
-            on_click = function() S.target = nil end,
-            { "text", "All targets" },
-            end_ = { "text", tostring(#S.targets), size = "small", color = "muted" } }
+        return { "list_item", "All targets", selected = S.target == nil,
+            end_ = { "text", tostring(#S.targets), size = "small", color = "muted" },
+            on_click = function() S.target = nil end }
     end
-    return { "list_item", selected = sel,
-        on_click = function() S.target = t.name end,
-        end_ = { "text", t.kind .. " · iOS " .. t.ios, size = "small", color = "muted" },
-        { "row", gap = 6,
-            { "text", t.name },
-            { "text", t.bundle_id, size = "small", color = "muted", truncate = true } } }
+    return { "list_item", t.name, detail = t.bundle_id, selected = S.target == t.name,
+        tooltip = t.kind .. " · " .. t.builder .. " · " .. t.dir,
+        end_ = { "text", "iOS " .. t.ios, size = "small", color = "muted" },
+        on_click = function() S.target = t.name end }
 end
 
-local function render(w)
-    local t = now()
-    if t - (S.last_discover or 0) > DISCOVER_SECONDS then discover() end
-    if not S.project then
-        return { "col", w = "full", h = "full",
-            { "panel_header", title = "No project",
-                { "icon_button", icon = "rotate_cw", tooltip = "Rescan",
-                  on_click = function() S.last_discover = 0 end } },
-            { "col", p = 12, gap = 6, grow = true,
-                { "text", S.discovering and "looking for idlproj.yml…"
-                    or "no idlproj.yml in the open folders, above them or one level below",
-                  fg = "muted", size = "small" } } }
-    end
-    if t - (S.last_list or 0) > LIST_SECONDS then list_targets() end
-    if S.devices == nil and not S.listing_devices then list_devices() end
-    if S.job then
-        local f = io.open(S.job.log)
-        local size = f and f:seek("end")
-        if f then f:close() end
-        if size and size ~= S.log_size then read_log(S.job.log) end
-    end
+local function device_row(d)
+    local color = d.available and "default" or "muted"
+    return { "list_item", d.name, color = color, selected = d.udid == S.device,
+        start = { "icon", name = "screen", color = color },
+        end_ = { "text", d.connection .. (d.available and "" or ", unavailable"),
+                 size = "small", color = "muted" },
+        on_click = function() S.device = d.udid end }
+end
 
-    local body = { "col", id = "idl-body", scroll = true, grow = true, gap = 2, py = 4 }
-    local function pad(e) return { "row", px = 8, py = 2, e } end
-    local function add(e) body[#body + 1] = e end
+local function refresh_button(tooltip, f, disabled)
+    return { "icon_button", icon = "rotate_cw", tooltip = tooltip, disabled = disabled, on_click = f }
+end
 
-    if #S.projects > 1 then
-        add(section("Project"))
-        local row = { "row", gap = 4 }
-        for _, p in ipairs(S.projects) do
-            row[#row + 1] = choice(basename(dirname(p)), p == S.project,
-                function() select_project(p) end)
-        end
-        add(pad(row))
-    end
-
-    add(section("Targets", { "icon_button", icon = "rotate_cw", tooltip = "Rescan targets",
-        on_click = function() S.last_list = 0 end }))
-    if S.list_error then
-        add(pad({ "text", S.list_error, color = "error", size = "small", mono = true }))
-    else
-        add(target_row(nil))
-        for _, tg in ipairs(S.targets) do add(target_row(tg)) end
-    end
-
-    add(pad({ "row", gap = 8,
-        { "toggle_group", options = { "debug", "release" }, selected = S.profile,
-          on_select = function(w, opt) S.profile = opt end },
-        { "checkbox", checked = S.strict, label = "strict",
-          on_click = function() S.strict = not S.strict end } }))
-
-    local busy = S.job ~= nil
-    add(pad({ "row", gap = 2,
-        { "button", "Build", on_click = action("build") },
-        { "button", "Install", on_click = install },
-        { "button", "Check", on_click = action("check") },
-        { "button", "Test", on_click = action("test") } }))
-    add(pad({ "row", gap = 2,
-        { "button", "Gen", on_click = action("gen") },
-        { "button", "Lint", on_click = action("lint") },
-        { "button", "Fmt", on_click = action("fmt") },
-        { "button", "Clean", on_click = action("clean") } }))
-
-    add(section("Devices", { "icon_button", icon = "rotate_cw",
-        tooltip = S.listing_devices and "listing…" or "Rescan devices (Jimpactor)",
-        disabled = S.listing_devices, on_click = function() list_devices() end }))
-    if S.device_error then
-        add(pad({ "text", S.device_error, color = "muted", size = "small" }))
-    elseif S.devices and #S.devices == 0 then
-        add(pad({ "text", "no devices", color = "muted", size = "small" }))
-    end
-    for _, d in ipairs(S.devices or {}) do
-        local sel = d.udid == S.device
-        add({ "list_item", selected = sel,
-            on_click = function() S.device = d.udid end,
-            start = { "icon", name = "screen", size = "small", color = d.available and "default" or "muted" },
-            end_ = { "text", d.connection .. (d.available and "" or ", unavailable"), size = "small",
-              color = "muted" },
-            { "text", d.name, truncate = true, color = d.available and "default" or "muted" } })
-    end
-
-    -- Output
+local function output(w, t)
     local status, color
     if S.job then
         status, color = string.format("%s  %.0fs", S.job.label, t - S.job.started), "accent"
@@ -388,39 +307,97 @@ local function render(w)
         if l:match(": error:") or l:match("^error:") then errors = errors + 1
         elseif l:match(": warning:") or l:match("^warning:") then warnings = warnings + 1 end
     end
-    local out = { "col", id = "idl-out", scroll = true, grow = true, p = 6, mono = true,
-        size = "small", bg = "editor", border = "border", rounded = 4 }
+    local out = { "col", id = "idl-out", scroll = true, grow = true, p = "sm",
+        bg = "editor", border = true, rounded = true }
     for _, l in ipairs(S.lines) do out[#out + 1] = output_line(l) end
-    if #S.lines == 0 then out[#out + 1] = { "text", "no output", fg = "muted" } end
+    if #S.lines == 0 then out[#out + 1] = { "text", "no output", size = "small", color = "muted" } end
     if S.follow and #S.lines ~= S.followed then
         S.followed = #S.lines
         pcall(w.scroll_bottom, "idl-out")
     end
 
-    local header = { "row", gap = 6,
-        { "text", status or "Output", size = "small", color = color or "muted", grow = true } }
+    local header = { "row", gap = "sm",
+        { "text", status or "Output", size = "small", color = color or "muted", grow = true, truncate = true } }
     if errors + warnings > 0 then
         header[#header + 1] = { "text", errors .. "E " .. warnings .. "W", size = "small",
-            fg = errors > 0 and "error" or "warning" }
+            color = errors > 0 and "error" or "warning" }
     end
-    if busy then
+    if S.job then
         header[#header + 1] = { "icon_button", icon = "stop", tooltip = "Stop", on_click = stop }
     elseif #S.lines > 0 then
         header[#header + 1] = { "icon_button", icon = "trash", tooltip = "Clear output",
             on_click = function() S.lines, S.last = {}, nil end }
     end
+    return { "col", grow = true, gap = "xs", p = "md", header, out }
+end
 
-    return { "col", w = "full", h = "full",
-        { "panel_header", title = basename(dirname(S.project)), context = S.target,
-            { "icon_button", icon = "rotate_cw", tooltip = "Rescan projects",
-              on_click = function() S.last_discover = 0 end } },
-        body,
-        { "divider" },
-        { "col", grow = true, gap = 4, p = 8, header, out },
-        { "divider" },
-        { "row", px = 8, py = 4,
-            { "text", S.message or S.project, size = "small", color = "muted", truncate = true, grow = true } },
-    }
+local function render(w)
+    local t = now()
+    if t - (S.last_discover or 0) > DISCOVER_SECONDS then discover() end
+    local rescan = refresh_button("Rescan projects", function() S.last_discover = 0 end)
+    if not S.project then
+        return { "panel", header = { title = "idl", actions = { rescan } },
+            { "empty", S.discovering and "looking for idlproj.yml…"
+                or "no idlproj.yml in the open folders, above them or one level below" } }
+    end
+    if t - (S.last_list or 0) > LIST_SECONDS then list_targets() end
+    if S.devices == nil and not S.listing_devices then list_devices() end
+    if S.job then
+        local f = io.open(S.job.log)
+        local size = f and f:seek("end")
+        if f then f:close() end
+        if size and size ~= S.log_size then read_log(S.job.log) end
+    end
+
+    local top = { "col", id = "idl-body", scroll = true, grow = true, py = "xs" }
+    local function add(e) top[#top + 1] = e end
+
+    if #S.projects > 1 then
+        local projects = { "section", "Project" }
+        for _, p in ipairs(S.projects) do
+            projects[#projects + 1] = { "list_item", basename(dirname(p)), selected = p == S.project,
+                tooltip = p, on_click = function() select_project(p) end }
+        end
+        add(projects)
+    end
+
+    local targets = { "section", "Targets",
+        action = refresh_button("Rescan targets", function() S.last_list = 0 end) }
+    if S.list_error then
+        targets[#targets + 1] = { "list_item", S.list_error, color = "error", size = "small" }
+    else
+        targets[#targets + 1] = target_row(nil)
+        for _, tg in ipairs(S.targets) do targets[#targets + 1] = target_row(tg) end
+    end
+    add(targets)
+
+    add({ "section", "Build",
+        { "toolbar",
+            { "toggle_group", options = { "debug", "release" }, selected = S.profile,
+              on_select = function(w, opt) S.profile = opt end },
+            { "checkbox", checked = S.strict, label = "strict",
+              on_click = function() S.strict = not S.strict end } },
+        { "toolbar",
+            { "button", "Build", icon = "tool_hammer", style = "filled", on_click = action("build") },
+            { "button", "Install", icon = "download", on_click = install },
+            { "button", "Check", on_click = action("check") },
+            { "button", "Test", on_click = action("test") },
+            { "button", "Gen", on_click = action("gen") },
+            { "button", "Lint", on_click = action("lint") },
+            { "button", "Fmt", on_click = action("fmt") },
+            { "button", "Clean", on_click = action("clean") } } })
+
+    local devices = { "section", "Devices",
+        empty = S.device_error or (S.devices and "no devices") or "listing…",
+        action = refresh_button(S.listing_devices and "listing…" or "Rescan devices (Jimpactor)",
+            function() list_devices() end, S.listing_devices) }
+    for _, d in ipairs(S.devices or {}) do devices[#devices + 1] = device_row(d) end
+    add(devices)
+
+    return { "panel", scroll = false,
+        header = { title = basename(dirname(S.project)), context = S.target, actions = { rescan } },
+        footer = S.message or S.project,
+        { "split", vertical = true, ratio = 0.55, top, output(w, t) } }
 end
 
 %ctor
@@ -431,7 +408,7 @@ end
         render = function(w)
             local ok, tree = pcall(render, w)
             if ok then return tree end
-            return { "text", "ycode-idl: " .. tostring(tree), fg = "error" }
+            return { "empty", "ycode-idl: " .. tostring(tree), color = "error" }
         end,
     }
 end
