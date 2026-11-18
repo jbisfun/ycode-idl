@@ -267,42 +267,47 @@ local function output_line(line)
     return { "text", line == "" and " " or line, fg = fg }
 end
 
-local function choice(text, selected, on_click, size)
-    return { "button", (selected and "● " or "") .. text, size = size or 11,
+local function choice(text, selected, on_click)
+    return { "button", text, style = selected and "filled" or nil,
         on_click = function() on_click() end }
 end
 
 local function section(title, extra)
     local row = { "row", gap = 6, align = "center",
-        { "text", title, bold = true, size = 12, fg = "muted", grow = true } }
+        { "text", title, bold = true, size = "small", fg = "muted", grow = true } }
     for _, e in ipairs(extra or {}) do row[#row + 1] = e end
     return row
 end
 
 local function target_row(t)
     local sel = S.target == (t and t.name)
-    local row = { "col", px = 6, py = 3, rounded = 4, bg = sel and "element" or nil,
-        on_click = function() S.target = t and t.name end }
     if not t then
-        row[#row + 1] = { "text", "All targets (" .. #S.targets .. ")", bold = sel }
-        return row
+        return { "list_item", selected = sel,
+            on_click = function() S.target = nil end,
+            { "text", "All targets (" .. #S.targets .. ")" } }
     end
-    row[#row + 1] = { "row", gap = 6,
-        { "text", t.name, bold = sel, grow = true },
-        { "text", t.kind .. " · " .. t.builder .. " · iOS " .. t.ios, size = 11, fg = "muted" } }
-    row[#row + 1] = { "text", t.bundle_id .. "  " .. t.dir, size = 11, fg = "muted", mono = true }
-    return row
+    return { "list_item", selected = sel,
+        on_click = function() S.target = t.name end,
+        { "col", gap = 2,
+            { "row", gap = 6,
+                { "text", t.name, grow = true },
+                { "text", t.kind .. " · " .. t.builder .. " · iOS " .. t.ios,
+                  size = "small", fg = "muted" } },
+            { "text", t.bundle_id .. "  " .. t.dir, size = "small", fg = "muted", mono = true } } }
 end
 
 local function render(w)
     local t = now()
     if t - (S.last_discover or 0) > DISCOVER_SECONDS then discover() end
     if not S.project then
-        return { "col", p = 12, gap = 6,
-            { "text", S.discovering and "looking for idlproj.yml…"
-                or "no idlproj.yml in the open folders, above them or one level below",
-              fg = "muted", size = 12 },
-            { "button", "Rescan", size = 11, on_click = function() S.last_discover = 0 end } }
+        return { "col", w = "full", h = "full",
+            { "panel_header", title = "idl",
+                { "icon_button", icon = "rotate_cw", tooltip = "Rescan",
+                  on_click = function() S.last_discover = 0 end } },
+            { "col", p = 12, gap = 6, grow = true,
+                { "text", S.discovering and "looking for idlproj.yml…"
+                    or "no idlproj.yml in the open folders, above them or one level below",
+                  fg = "muted", size = "small" } } }
     end
     if t - (S.last_list or 0) > LIST_SECONDS then list_targets() end
     if S.devices == nil and not S.listing_devices then list_devices() end
@@ -326,19 +331,19 @@ local function render(w)
         add(row)
     end
 
-    add(section("Targets", { { "button", "↻", size = 11,
+    add(section("Targets", { { "icon_button", icon = "rotate_cw", tooltip = "Rescan targets",
         on_click = function() S.last_list = 0 end } }))
     if S.list_error then
-        add({ "text", S.list_error, fg = "error", size = 11, mono = true })
+        add({ "text", S.list_error, fg = "error", size = "small", mono = true })
     else
         add(target_row(nil))
         for _, tg in ipairs(S.targets) do add(target_row(tg)) end
     end
 
     add({ "row", gap = 4, align = "center",
-        choice("debug", S.profile == "debug", function() S.profile = "debug" end),
-        choice("release", S.profile == "release", function() S.profile = "release" end),
-        { "button", (S.strict and "☑" or "☐") .. " strict", size = 11,
+        { "toggle_group", options = { "debug", "release" }, selected = S.profile,
+          on_select = function(w, opt) S.profile = opt end },
+        { "checkbox", checked = S.strict, label = "strict",
           on_click = function() S.strict = not S.strict end } })
 
     local busy = S.job ~= nil
@@ -348,24 +353,25 @@ local function render(w)
         { "button", "Check", on_click = action("check") },
         { "button", "Test", on_click = action("test") } })
     add({ "row", gap = 4,
-        { "button", "Gen", size = 11, on_click = action("gen") },
-        { "button", "Lint", size = 11, on_click = action("lint") },
-        { "button", "Fmt", size = 11, on_click = action("fmt") },
-        { "button", "Clean", size = 11, on_click = action("clean") } })
+        { "button", "Gen", on_click = action("gen") },
+        { "button", "Lint", on_click = action("lint") },
+        { "button", "Fmt", on_click = action("fmt") },
+        { "button", "Clean", on_click = action("clean") } })
 
-    add(section("Devices (Jimpactor)", { { "button", S.listing_devices and "…" or "↻", size = 11,
-        on_click = function() list_devices() end } }))
+    add(section("Devices (Jimpactor)", { { "icon_button", icon = "rotate_cw",
+        tooltip = S.listing_devices and "listing…" or "Rescan devices",
+        disabled = S.listing_devices, on_click = function() list_devices() end } }))
     if S.device_error then
-        add({ "text", S.device_error, fg = "muted", size = 11 })
+        add({ "text", S.device_error, fg = "muted", size = "small" })
     elseif S.devices and #S.devices == 0 then
-        add({ "text", "no devices", fg = "muted", size = 11 })
+        add({ "text", "no devices", fg = "muted", size = "small" })
     end
     for _, d in ipairs(S.devices or {}) do
         local sel = d.udid == S.device
-        add({ "row", gap = 6, px = 6, py = 3, rounded = 4, bg = sel and "element" or nil,
+        add({ "list_item", selected = sel,
             on_click = function() S.device = d.udid end,
-            { "text", d.name, bold = sel, grow = true, fg = d.available and "text" or "muted" },
-            { "text", d.connection .. (d.available and "" or ", unavailable"), size = 11,
+            { "text", d.name, grow = true, fg = d.available and "text" or "muted" },
+            { "text", d.connection .. (d.available and "" or ", unavailable"), size = "small",
               fg = "muted" } })
     end
 
@@ -385,7 +391,7 @@ local function render(w)
         elseif l:match(": warning:") or l:match("^warning:") then warnings = warnings + 1 end
     end
     local out = { "col", id = "idl-out", scroll = true, grow = true, p = 6, mono = true,
-        size = 11, bg = "editor", border = "border", rounded = 4 }
+        size = "small", bg = "editor", border = "border", rounded = 4 }
     for _, l in ipairs(S.lines) do out[#out + 1] = output_line(l) end
     if #S.lines == 0 then out[#out + 1] = { "text", "no output", fg = "muted" } end
     if S.follow and #S.lines ~= S.followed then
@@ -394,26 +400,25 @@ local function render(w)
     end
 
     local header = { "row", gap = 6, align = "center",
-        { "text", status or "Output", size = 11, fg = color or "muted", grow = true } }
+        { "text", status or "Output", size = "small", fg = color or "muted", grow = true } }
     if errors + warnings > 0 then
-        header[#header + 1] = { "text", errors .. "E " .. warnings .. "W", size = 11,
+        header[#header + 1] = { "text", errors .. "E " .. warnings .. "W", size = "small",
             fg = errors > 0 and "error" or "warning" }
     end
     if busy then
-        header[#header + 1] = { "button", "Stop", size = 11, on_click = stop }
+        header[#header + 1] = { "button", "Stop", on_click = stop }
     elseif #S.lines > 0 then
-        header[#header + 1] = { "button", "Clear", size = 11,
+        header[#header + 1] = { "button", "Clear",
             on_click = function() S.lines, S.last = {}, nil end }
     end
 
     return { "col", w = "full", h = "full",
-        { "row", gap = 6, align = "center", px = 8, py = 6, border = "border",
-            { "text", "idl", bold = true },
-            { "text", basename(dirname(S.project)), size = 11, fg = "muted", grow = true },
-            { "button", "Rescan", size = 11, on_click = function() S.last_discover = 0 end } },
-        { "col", h = 330, body },
+        { "panel_header", title = "idl", context = basename(dirname(S.project)),
+            { "icon_button", icon = "rotate_cw", tooltip = "Rescan projects",
+              on_click = function() S.last_discover = 0 end } },
+        body,
         { "col", grow = true, gap = 4, px = 8, py = 6, header, out },
-        { "text", S.message or S.project, size = 11, mono = true, fg = "muted", px = 8, py = 4 },
+        { "text", S.message or S.project, size = "small", mono = true, fg = "muted", px = 8, py = 4 },
     }
 end
 
